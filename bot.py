@@ -26,12 +26,14 @@ def init_data():
     return load_data()
 
 def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {}
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.load(f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 data = init_data()
 
@@ -116,7 +118,7 @@ def set_all_permission(msg):
     save_data(data)
     bot.reply_to(msg, "✅ 群内所有人均可使用记账")
 
-@bot.message_handler(func=lambda m: m.text and m.text == "删除账单")
+@bot.message_handler(func=lambda m: m.text == "删除账单")
 def clear_bill(msg):
     chat_id = str(msg.chat.id)
     data["records"][chat_id] = []
