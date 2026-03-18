@@ -13,14 +13,9 @@ DATA_FILE = "data.json"
 def init_data():
     if not os.path.exists(DATA_FILE):
         data = {
-            "groups": {},
-            "operators": {},
-            "records": {},
-            "rate": {"default": 7.0},
-            "fee": {"default": 0},
-            "timer": {},
-            "day_cut": {},
-            "all_permission": {}
+            "groups": {}, "operators": {}, "records": {},
+            "rate": {"default": 6.93}, "fee": {"default": 0},
+            "timer": {}, "day_cut": {}, "all_permission": {}
         }
         save_data(data)
     return load_data()
@@ -36,6 +31,65 @@ def save_data(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 data = init_data()
+
+def get_today():
+    return datetime.now().strftime("%Y-%m-%d")
+
+def show_final_format(chat_id):
+    records = data["records"].get(chat_id, [])
+    rate = data["rate"]["default"]
+    today = get_today()
+
+    in_list = []
+    out_list = []
+    total_in_cny = 0.0
+    total_out_cny = 0.0
+
+    for r in records:
+        d = r.get("time", "")
+        if " " in d:
+            r["real_time"] = d.split(" ")[1]
+        else:
+            r["real_time"] = "00:00:00"
+
+        if r["type"] == "入款":
+            money = r["money"]
+            total_in_cny += money
+            usdt = round(money / rate, 2)
+            line = f"{r['real_time']}  {money}/{rate}={usdt}  {r['user']}"
+            in_list.append(line)
+
+        if r["type"] == "下发":
+            money = r["money"]
+            cny = round(money * rate, 2)
+            total_out_cny += cny
+            line = f"{r['real_time']}  {money}U（{cny}R）  {r['user']}"
+            out_list.append(line)
+
+    in_show = "\n".join(in_list[-3:])
+    out_show = "\n".join(out_list[-3:])
+
+    should_out_cny = total_in_cny
+    should_out_usdt = round(should_out_cny / rate, 2)
+    already_out_cny = total_out_cny
+    already_out_usdt = round(already_out_cny / rate, 2)
+    remain_cny = round(should_out_cny - already_out_cny, 2)
+    remain_usdt = round(remain_cny / rate, 2)
+
+    res = f"""✅今日入款（最近3笔）：
+{in_show}
+
+✅今日下发（最近3笔）：
+{out_show}
+
+📌设置汇率：{rate}
+
+📊 总账单
+应下发：{should_out_cny}CNY / {should_out_usdt}USDT
+已下发：{already_out_cny}CNY / {already_out_usdt}USDT
+未下发：{remain_cny}CNY / {remain_usdt}USDT"""
+
+    return res
 
 def check_permission(chat_id, user_id, username):
     chat_id = str(chat_id)
@@ -65,11 +119,10 @@ def start_book(msg):
         save_data(data)
     bot.reply_to(msg, "✅ 群记账已开启！请设置管理员后使用")
 
-@bot.message_handler(func=lambda m: m.text and m.text.startswith("设置操作人"))
+@bot.message_handler(func=lambda m: m.text.startswith("设置操作人"))
 def add_operator(msg):
     chat_id = str(msg.chat.id)
-    text = msg.text.strip()
-    match = re.search(r'@\w+', text)
+    match = re.search(r'@\w+', msg.text)
     if not match:
         bot.reply_to(msg, "❌ 格式：设置操作人 @张三")
         return
@@ -81,11 +134,10 @@ def add_operator(msg):
         save_data(data)
         bot.reply_to(msg, f"✅ 已添加操作人：{target}")
 
-@bot.message_handler(func=lambda m: m.text and m.text.startswith("删除操作人"))
+@bot.message_handler(func=lambda m: m.text.startswith("删除操作人"))
 def del_operator(msg):
     chat_id = str(msg.chat.id)
-    text = msg.text.strip()
-    match = re.search(r'@\w+', text)
+    match = re.search(r'@\w+', msg.text)
     if not match:
         bot.reply_to(msg, "❌ 格式：删除操作人 @张三")
         return
@@ -95,23 +147,20 @@ def del_operator(msg):
         save_data(data)
         bot.reply_to(msg, f"✅ 已删除操作人：{target}")
 
-@bot.message_handler(func=lambda m: m.text and m.text == "显示操作人")
+@bot.message_handler(func=lambda m: m.text == "显示操作人")
 def show_operators(msg):
     chat_id = str(msg.chat.id)
     ops = data["operators"].get(chat_id, [])
-    if not ops:
-        bot.reply_to(msg, "❌ 暂无操作人")
-        return
-    bot.reply_to(msg, "👥 当前操作人：\n" + "\n".join(ops))
+    bot.reply_to(msg, "👥 当前操作人：\n" + "\n".join(ops) if ops else "❌ 暂无操作人")
 
-@bot.message_handler(func=lambda m: m.text and m.text == "删除所有人")
+@bot.message_handler(func=lambda m: m.text == "删除所有人")
 def del_all_ops(msg):
     chat_id = str(msg.chat.id)
     data["operators"][chat_id] = []
     save_data(data)
     bot.reply_to(msg, "✅ 已清空所有操作人")
 
-@bot.message_handler(func=lambda m: m.text and m.text == "设置所有人")
+@bot.message_handler(func=lambda m: m.text == "设置所有人")
 def set_all_permission(msg):
     chat_id = str(msg.chat.id)
     data["all_permission"][chat_id] = True
@@ -133,18 +182,19 @@ def handle_money(msg):
     if not check_permission(chat_id, msg.from_user.id, username):
         return
 
+    now_time = datetime.now().strftime("%m-%d %H:%M:%S")
+
     if text.startswith("+"):
         num_str = re.findall(r'\+([\d\.]+)', text)
         if not num_str:
             return
         money = float(num_str[0])
-        coin = "USDT" if "u" in text.lower() else "CNY"
         data["records"][chat_id].append({
-            "type": "入款", "money": money, "coin": coin,
-            "user": username, "time": datetime.now().strftime("%m-%d %H:%M")
+            "type": "入款", "money": money, "coin": "CNY",
+            "user": username, "time": now_time
         })
         save_data(data)
-        bot.reply_to(msg, f"✅ 入款成功：{money}{coin}")
+        bot.reply_to(msg, show_final_format(chat_id))
         return
 
     if text.startswith("下发"):
@@ -152,13 +202,12 @@ def handle_money(msg):
         if not num_str:
             return
         money = float(num_str[0])
-        coin = "USDT" if "u" in text.lower() else "CNY"
         data["records"][chat_id].append({
-            "type": "下发", "money": money, "coin": coin,
-            "user": username, "time": datetime.now().strftime("%m-%d %H:%M")
+            "type": "下发", "money": money, "coin": "USDT",
+            "user": username, "time": now_time
         })
         save_data(data)
-        bot.reply_to(msg, f"✅ 下发成功：{money}{coin}")
+        bot.reply_to(msg, show_final_format(chat_id))
         return
 
     if "入款-" in text:
@@ -166,11 +215,11 @@ def handle_money(msg):
         if num_str:
             money = float(num_str[0])
             data["records"][chat_id].append({
-                "type": "修正入款", "money": -money, "coin": "CNY",
-                "user": username, "time": datetime.now().strftime("%m-%d %H:%M")
+                "type": "入款", "money": -money, "coin": "CNY",
+                "user": username, "time": now_time
             })
             save_data(data)
-            bot.reply_to(msg, f"✅ 入款减少：{money}")
+            bot.reply_to(msg, show_final_format(chat_id))
         return
 
     if "下发-" in text:
@@ -178,36 +227,21 @@ def handle_money(msg):
         if num_str:
             money = float(num_str[0])
             data["records"][chat_id].append({
-                "type": "修正下发", "money": -money, "coin": "CNY",
-                "user": username, "time": datetime.now().strftime("%m-%d %H:%M")
+                "type": "下发", "money": -money, "coin": "USDT",
+                "user": username, "time": now_time
             })
             save_data(data)
-            bot.reply_to(msg, f"✅ 下发减少：{money}")
+            bot.reply_to(msg, show_final_format(chat_id))
         return
 
 @bot.message_handler(func=lambda m: m.text == "显示账单")
 def show_bill(msg):
     chat_id = str(msg.chat.id)
-    records = data["records"].get(chat_id, [])
-    in_cny = in_usdt = out_cny = out_usdt = 0
-    for r in records:
-        if r["type"] == "入款":
-            if r["coin"] == "CNY":
-                in_cny += r["money"]
-            else:
-                in_usdt += r["money"]
-        if r["type"] == "下发":
-            if r["coin"] == "CNY":
-                out_cny += r["money"]
-            else:
-                out_usdt += r["money"]
-    res = f"📊 总账单\n入款：{in_cny}CNY / {in_usdt}USDT\n下发：{out_cny}CNY / {out_usdt}USDT"
-    bot.reply_to(msg, res)
+    bot.reply_to(msg, show_final_format(chat_id))
 
 @bot.message_handler(func=lambda m: m.text == "z0")
 def show_rate(msg):
-    r = data["rate"]["default"]
-    bot.reply_to(msg, f"💱 当前汇率 1USDT = {r} CNY")
+    bot.reply_to(msg, f"💱 当前汇率：1USDT = {data['rate']['default']} CNY")
 
 @bot.message_handler(func=lambda m: m.text.startswith("z"))
 def z_convert(msg):
@@ -215,8 +249,7 @@ def z_convert(msg):
     if not num_str:
         return
     cny = float(num_str[0])
-    rate = data["rate"]["default"]
-    usdt = round(cny / rate, 2)
+    usdt = round(cny / data["rate"]["default"], 2)
     bot.reply_to(msg, f"💱 {cny}CNY = {usdt}USDT")
 
 @bot.message_handler(func=lambda m: m.text.startswith("设置汇率"))
@@ -226,14 +259,6 @@ def set_rate(msg):
         data["rate"]["default"] = float(num_str[0])
         save_data(data)
         bot.reply_to(msg, f"✅ 汇率已设为：{num_str[0]}")
-
-@bot.message_handler(func=lambda m: m.text.startswith("设置费率"))
-def set_fee(msg):
-    num_str = re.findall(r'([-\d\.]+)', msg.text)
-    if num_str:
-        data["fee"]["default"] = float(num_str[0])
-        save_data(data)
-        bot.reply_to(msg, f"✅ 费率已设为：{num_str[0]}%")
 
 @bot.message_handler(func=lambda m: m.text == "撤销入款")
 def undo_in(msg):
@@ -256,15 +281,14 @@ def undo_out(msg):
 @bot.message_handler(func=lambda m: "开始计时打卡" in m.text)
 def start_timer(msg):
     chat_id = str(msg.chat.id)
-    data["timer"][chat_id] = datetime.now().strftime("%m-%d %H:%M")
+    data["timer"][chat_id] = datetime.now().strftime("%m-%d %H:%M:%S")
     save_data(data)
     bot.reply_to(msg, "✅ 计时已开始")
 
 @bot.message_handler(func=lambda m: "停止计时打卡" in m.text)
 def stop_timer(msg):
     chat_id = str(msg.chat.id)
-    t = data["timer"].get(chat_id, "未开始")
-    bot.reply_to(msg, f"✅ 计时停止\n开始时间：{t}")
+    bot.reply_to(msg, f"✅ 计时停止")
 
 @bot.message_handler(func=lambda m: m.text == "@所有人")
 def at_all(msg):
@@ -273,18 +297,17 @@ def at_all(msg):
 @bot.message_handler(func=lambda m: m.text.startswith("日切#"))
 def set_day_cut(msg):
     chat_id = str(msg.chat.id)
-    val = msg.text.split("#")[-1]
-    data["day_cut"][chat_id] = val
+    data["day_cut"][chat_id] = msg.text.split("#")[-1]
     save_data(data)
-    bot.reply_to(msg, f"✅ 日切已设为：{val}")
+    bot.reply_to(msg, "✅ 日切已设置")
 
 @bot.message_handler(commands=["我"])
 def my_bill(msg):
     chat_id = str(msg.chat.id)
     user = get_username(msg)
-    recs = [r for r in data["records"].get(chat_id, []) if r["user"] == user]
-    in_sum = sum(r["money"] for r in recs if r["type"] == "入款")
-    out_sum = sum(r["money"] for r in recs if r["type"] == "下发")
+    recs = [r for r in data["records"].get(chat_id,[]) if r["user"]==user]
+    in_sum = sum(r["money"] for r in recs if r["type"]=="入款")
+    out_sum = sum(r["money"] for r in recs if r["type"]=="下发")
     bot.reply_to(msg, f"👤 个人账单\n入款：{in_sum}\n下发：{out_sum}")
 
 @bot.message_handler(func=lambda m: m.text == "上课")
@@ -300,35 +323,38 @@ def class_close(msg):
 @bot.message_handler(func=lambda m: m.text and len(m.text.split()) >= 2)
 def name_record(msg):
     chat_id = str(msg.chat.id)
+    username = get_username(msg)
+    if not check_permission(chat_id, msg.from_user.id, username):
+        return
     parts = msg.text.split()
     if len(parts) < 2:
         return
     name = parts[0]
     act = parts[1]
+    now_time = datetime.now().strftime("%m-%d %H:%M:%S")
+
     if act.startswith("+"):
         money = float(act[1:])
         data["records"][chat_id].append({
-            "type": "入款", "money": money, "user": name,
-            "time": datetime.now().strftime("%m-%d %H:%M")
+            "type": "入款", "money": money, "user": name, "time": now_time
         })
         save_data(data)
-        bot.reply_to(msg, f"✅ {name} 入款 {money}")
+        bot.reply_to(msg, show_final_format(chat_id))
         return
+
     if act == "下发" and len(parts) >= 3:
         money = float(parts[2])
         data["records"][chat_id].append({
-            "type": "下发", "money": money, "user": name,
-            "time": datetime.now().strftime("%m-%d %H:%M")
+            "type": "下发", "money": money, "user": name, "time": now_time
         })
         save_data(data)
-        bot.reply_to(msg, f"✅ {name} 下发 {money}")
+        bot.reply_to(msg, show_final_format(chat_id))
         return
 
 @bot.message_handler(func=lambda m: m.text and any(c in m.text for c in "+-*/"))
 def calc(msg):
     try:
-        exp = msg.text.replace("×", "*").replace("÷", "/")
-        res = eval(exp)
+        res = eval(msg.text.replace("×","*").replace("÷","/"))
         bot.reply_to(msg, f"🧮 结果：{res}")
     except:
         return
