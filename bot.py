@@ -4,10 +4,7 @@ import os
 import re
 import requests
 from datetime import datetime, timedelta, timezone
-from telebot.types import ChatPermissions
-from dotenv import load_dotenv
 
-load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
 
@@ -32,12 +29,11 @@ def get_okx_best_price():
     return 6.93
 
 def init_data():
-    if not os.exists(DATA_FILE):
+    if not os.path.exists(DATA_FILE):
         data = {
             "groups": {}, "operators": {}, "records": {},
             "rate": {"default": 6.93}, "fee": {"default": 0},
-            "timer": {}, "day_cut": {}, "all_permission": {},
-            "last_day_cut": {}
+            "day_cut": {}, "last_day_cut": {}, "all_permission": {}
         }
         save_data(data)
     return load_data()
@@ -50,7 +46,7 @@ def load_data():
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(data, ensure_ascii=False, indent=2)
 
 data = init_data()
 
@@ -63,8 +59,6 @@ def check_day_cut(chat_id):
     last = data.get("last_day_cut", {}).get(chat_id, "")
     if last != now_hour and now_hour == day_cut_hour:
         data["records"][chat_id] = []
-        if "last_day_cut" not in data:
-            data["last_day_cut"] = {}
         data["last_day_cut"][chat_id] = now_hour
         save_data(data)
 
@@ -132,7 +126,8 @@ def get_username(msg):
 def start_book(msg):
     cid = str(msg.chat.id)
     if msg.chat.type not in ["group", "supergroup"]:
-        return bot.reply_to(msg, "❌ 请在群聊使用")
+        bot.reply_to(msg, "❌ 请在群聊使用")
+        return
     if cid not in data["groups"]:
         data["groups"][cid] = {"name": msg.chat.title}
         data["operators"][cid] = []
@@ -146,7 +141,8 @@ def add_op(msg):
     cid = str(msg.chat.id)
     match = re.search(r'@\w+', msg.text)
     if not match:
-        return bot.reply_to(msg, "格式：设置操作人 @xxx")
+        bot.reply_to(msg, "格式：设置操作人 @xxx")
+        return
     u = match.group(0)
     if cid not in data["operators"]:
         data["operators"][cid] = []
@@ -184,7 +180,7 @@ def z0(msg):
     bot.reply_to(msg, f"💱 欧意实时收U价格：{p}")
 
 @bot.message_handler(func=lambda m: m.text)
-def all_msgs(msg):
+def handle_all(msg):
     cid = str(msg.chat.id)
     text = msg.text.strip()
     user = get_username(msg)
@@ -193,9 +189,9 @@ def all_msgs(msg):
 
     t, _ = get_beijing_time()
 
-    if any(c in text for c in "+-*/") and not any(k in text for k in ["设置","下发","入款","@","#"]):
+    if any(c in text for c in "+-*/") and not any(k in text for k in ["设置", "下发", "入款", "@", "#"]):
         try:
-            r = eval(text.replace("×","*").replace("÷","/"))
+            r = eval(text.replace("×", "*").replace("÷", "/"))
             bot.reply_to(msg, f"🧮 结果：{r}")
         except:
             pass
@@ -234,5 +230,5 @@ def all_msgs(msg):
         return
 
 if __name__ == "__main__":
-    print("✅ 机器人本地启动成功（北京时间）")
+    print("✅ 机器人启动成功")
     bot.infinity_polling()
